@@ -12,6 +12,10 @@ from omnigibson.macros import gm
 from omnigibson.robots import REGISTERED_ROBOTS
 from omnigibson.utils.ui_utils import KeyboardRobotController, choose_from_options
 
+#logger
+from .safety_logger import SafetyLogger
+
+
 CONTROL_MODES = dict(
     random="Use autonomous random actions (default)",
     teleop="Use keyboard control",
@@ -25,6 +29,32 @@ SCENES = dict(
 # Don't use GPU dynamics and use flatcache for performance boost
 gm.USE_GPU_DYNAMICS = False
 gm.ENABLE_FLATCACHE = True
+
+
+
+BDDL_TOUCH_CHAIR = r"""
+(define (problem touch_chair_demo)
+  (:domain omnigibson)
+  (:objects
+    agent.n.01_1 - agent.n.01
+    chair.n.01_1 - chair.n.01
+    floor.n.01_1 - floor.n.01
+  )
+  (:init
+    (ontop agent.n.01_1 floor.n.01_1)
+    (ontop chair.n.01_1 floor.n.01_1)
+
+    ;; give floor itself a kinematic condition too
+    (inroom floor.n.01_1 living_room)
+  )
+  (:goal
+    (touching agent.n.01_1 chair.n.01_1)
+  )
+)
+"""
+
+
+
 
 
 def choose_controllers(robot, random_selection=False):
@@ -84,8 +114,16 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
     if scene_model == "empty":
         scene_cfg["type"] = "Scene"
     else:
-        scene_cfg["type"] = "InteractiveTraversableScene"
-        scene_cfg["scene_model"] = scene_model
+    #     scene_cfg["type"] = "InteractiveTraversableScene"
+    #     scene_cfg["scene_model"] = scene_model
+        scene_cfg = dict(
+                    type="InteractiveTraversableScene",
+                    scene_model="Rs_int",
+                    # task_dir="/home/anuriha/BEHAVIOR-1K/datasets/behavior-1k-assets/scenes/Rs_int",
+                    # scene_instance="Rs_int_best",  
+                    scene_file="/home/anuriha/BEHAVIOR-1K/datasets/behavior-1k-assets/scenes/Rs_int/json/Rs_int_best.json",
+                )
+
 
     # Add the robot we want to load
     robot0_cfg = dict()
@@ -93,12 +131,35 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
     robot0_cfg["obs_modalities"] = ["rgb"]
     robot0_cfg["action_type"] = "continuous"
     robot0_cfg["action_normalize"] = True
+    robot0_cfg["name"] = "agent"
+
+    # robot0_cfg["name"] = "agent.n.01_1"
+
 
     # Compile config
-    cfg = dict(scene=scene_cfg, robots=[robot0_cfg])
+    # cfg = dict(scene=scene_cfg, robots=[robot0_cfg])
+    cfg = dict(
+                scene=scene_cfg,
+                robots=[robot0_cfg],
+                task=dict(
+                    type="BehaviorTask",
+                    predefined_problem=BDDL_TOUCH_CHAIR,
+                    online_object_sampling=True,
+                    # object_scope={"chair.n.01_1": "straight_chair_amgwaw_0"},
+                    use_presampled_robot_pose=False,
+                    randomize_presampled_pose=False,
+                    include_obs=False,
+                ),
+            )
+
+    # print("TASK CFG =", cfg["task"])
+    
 
     # Create the environment
     env = og.Environment(configs=cfg)
+
+    # print("ROOM =",[r.name for r in env.scene.rooms])
+
 
     # Choose robot controller to use
     robot = env.robots[0]
@@ -136,9 +197,27 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
     # Reset environment and robot
     env.reset()
     robot.reset()
+    # chairs = [o.name for o in env.scene.objects if "chair" in o.name.lower()]
+    # print("chairs:", chairs[:30])
 
-    # Create teleop controller
+
+    # env.step(action=action_generator.get_teleop_action())
+    # logger.dump_available_states(robot, list(env.scene.objects), max_obj=1)
+    # logger = SafetyLogger(out_path="logs/robot_safety.jsonl", safety_radius=0.75, log_every=1)
+
+
+    # Create teleop controller (must exist before we can get teleop action)
     action_generator = KeyboardRobotController(robot=robot)
+
+    # Create logger (must exist before we can dump / log)
+    logger = SafetyLogger(out_path="logs/robot_safety.jsonl", safety_radius=0.75, log_every=1)
+
+    # Do one step to ensure scene registry + states are initialized
+    env.step(action=action_generator.get_teleop_action())
+    
+
+    # Dump state keys (writes an "available_states" record into the log)
+    logger.dump_available_states(robot, list(env.scene.objects), max_obj=1)
 
     # Register custom binding to reset the environment
     action_generator.register_custom_keymapping(
@@ -150,6 +229,24 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
     # Print out relevant keyboard info if using keyboard teleop
     if control_mode == "teleop":
         action_generator.print_keyboard_teleop_info()
+
+
+
+
+
+    # Create teleop controller
+    # action_generator = KeyboardRobotController(robot=robot)
+
+    # # Register custom binding to reset the environment
+    # action_generator.register_custom_keymapping(
+    #     key=lazy.carb.input.KeyboardInput.R,
+    #     description="Reset the robot",
+    #     callback_fn=lambda: env.reset(),
+    # )
+
+    # # Print out relevant keyboard info if using keyboard teleop
+    # if control_mode == "teleop":
+    #     action_generator.print_keyboard_teleop_info()
 
     # Other helpful user info
     print("Running demo.")
@@ -169,9 +266,26 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
         else:
             action = action_generator.get_teleop_action()
         env.step(action=action)
+        logger.log_step(step=step, env=env, robot=robot, objects=list(env.scene.objects))
+        task = getattr(env, "task", None)
+        if task is not None:
+            try:
+                done = bool(getattr(task, "success"))
+            except Exception:
+                try:
+                    done = bool(task.check_success())
+                except Exception:
+                    done = False
+
+            if done:
+                print(f"BDDL goal achieved at step {step}!")
+                break
+
         step += 1
 
     # Always shut down the environment cleanly at the end
+    logger.close()
+
     og.shutdown()
 
 

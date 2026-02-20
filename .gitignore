@@ -6,3 +6,22 @@ gha-creds-*.json
 # training
 outputs/
 /*.ipynb
+# Local artifacts
+logs/
+appdata/
+*.log
+*.jsonl
+*.txt
+core.*
+__pycache__/
+*.pyc
+
+# Large datasets
+datasets/
+
+# big / generated artifacts (don't push)
+omnigibson_SHADOW/data/scenes/my_scene/*.usdc
+omnigibson_SHADOW/data/scenes/my_scene/**/*.usdc
+rl/rollouts/*.h5
+**/*.h5
+**/*.hdf5
