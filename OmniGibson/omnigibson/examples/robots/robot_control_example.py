@@ -14,11 +14,14 @@ from omnigibson.utils.ui_utils import KeyboardRobotController, choose_from_optio
 
 #logger
 from .safety_logger import SafetyLogger
+#controller
+from .chair_controller import ChairController
 
 
 CONTROL_MODES = dict(
     random="Use autonomous random actions (default)",
     teleop="Use keyboard control",
+    chair="Autonomous chair seeker",
 )
 
 SCENES = dict(
@@ -26,9 +29,9 @@ SCENES = dict(
     empty="Empty environment with no objects",
 )
 
-# Don't use GPU dynamics and use flatcache for performance boost
-gm.USE_GPU_DYNAMICS = False
-gm.ENABLE_FLATCACHE = True
+
+gm.USE_GPU_DYNAMICS = True
+# gm.ENABLE_FLATCACHE = True
 
 
 
@@ -141,15 +144,25 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
     cfg = dict(
                 scene=scene_cfg,
                 robots=[robot0_cfg],
+                # task=dict(
+                #     type="BehaviorTask",
+                #     predefined_problem=BDDL_TOUCH_CHAIR,
+                #     online_object_sampling=True,
+                #     # object_scope={"chair.n.01_1": "straight_chair_amgwaw_0"},
+                #     use_presampled_robot_pose=False,
+                #     randomize_presampled_pose=False,
+                #     include_obs=False,
+                # ),
                 task=dict(
-                    type="BehaviorTask",
-                    predefined_problem=BDDL_TOUCH_CHAIR,
-                    online_object_sampling=True,
-                    # object_scope={"chair.n.01_1": "straight_chair_amgwaw_0"},
-                    use_presampled_robot_pose=False,
-                    randomize_presampled_pose=False,
-                    include_obs=False,
-                ),
+                        type="BehaviorTask",
+
+                        activity_name="knock_over_chair",
+                        activity_definition_id=0,
+                        # activity_instance_id=0,
+
+                        online_object_sampling=True,
+                        use_presampled_robot_pose=False,
+                    ),
             )
 
     # print("TASK CFG =", cfg["task"])
@@ -196,7 +209,10 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
 
     # Reset environment and robot
     env.reset()
+    print("Task:", env.task.activity_name)
+    print("Goal:", env.task.activity_goal_conditions)
     robot.reset()
+    controller = ChairController(env, robot)
     # chairs = [o.name for o in env.scene.objects if "chair" in o.name.lower()]
     # print("chairs:", chairs[:30])
 
@@ -263,8 +279,17 @@ def main(random_selection=False, headless=False, short_exec=False, quickstart=Fa
             if step % 30 == 0:
                 random_action = action_generator.get_random_action() * 0.05
             action = random_action
-        else:
+        # else:
+            # action = action_generator.get_teleop_action()
+        elif control_mode == "teleop":
+
             action = action_generator.get_teleop_action()
+
+        elif control_mode == "chair":
+
+            action = controller.get_action()
+            
+            
         env.step(action=action)
         logger.log_step(step=step, env=env, robot=robot, objects=list(env.scene.objects))
         task = getattr(env, "task", None)

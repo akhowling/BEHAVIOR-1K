@@ -1,0 +1,27 @@
+(define (problem patrol_living_room-0)
+    (:domain omnigibson)
+
+    (:objects
+        chair.n.01_1 - chair.n.01
+        table.n.02_1 - table.n.02
+        floor.n.01_1 - floor.n.01
+        agent.n.01_1 - agent.n.01
+    )
+
+    (:init
+        (ontop chair.n.01_1 floor.n.01_1)
+        (ontop table.n.02_1 floor.n.01_1)
+
+        (inroom floor.n.01_1 living_room)
+
+        (ontop agent.n.01_1 floor.n.01_1)
+    )
+
+    (:goal
+        (and
+            (touching agent.n.01_1 chair.n.01_1)
+            (touching agent.n.01_1 table.n.02_1)
+            (touching agent.n.01_1 door.n.01_1)
+        )
+    )
+)

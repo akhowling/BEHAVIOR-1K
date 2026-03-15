@@ -414,6 +414,8 @@ class BehaviorTask(BaseTask):
         """
         # We assume the relevant agent is the first agent in the scene
         return env.robots[0]
+        #robots ['A1', 'BehaviorRobot', 'Fetch', 'FrankaMounted', 'FrankaPanda', 'Freight', 'Husky', 'Locobot', 'R1', 'R1Pro', 'Stretch', 'Tiago', 'Turtlebot', 'VX300S']
+
 
     def assign_object_scope_with_cache(self, env):
         """
@@ -481,6 +483,7 @@ class BehaviorTask(BaseTask):
 
         # Always add agent info first
         agent = self.get_agent(env=env)
+        has_arms = hasattr(agent, "arm_names")
 
         for (obj, obj_exist), obj_rpy, obj_rpy_cos, obj_rpy_sin in zip(
             objs_exist.items(), objs_rpy, objs_rpy_cos, objs_rpy_sin
@@ -492,7 +495,7 @@ class BehaviorTask(BaseTask):
                 low_dim_obs[f"{obj.bddl_inst}_pos"] = obj.states[Pose].get_value()[0]
                 low_dim_obs[f"{obj.bddl_inst}_ori_cos"] = obj_rpy_cos
                 low_dim_obs[f"{obj.bddl_inst}_ori_sin"] = obj_rpy_sin
-                if obj.name != agent.name:
+                if obj.name != agent.name and has_arms:
                     for arm in agent.arm_names:
                         grasping_object = agent.is_grasping(arm=arm, candidate_obj=obj.wrapped_obj)
                         low_dim_obs[f"{obj.bddl_inst}_in_gripper_{arm}"] = th.tensor([float(grasping_object)])
@@ -501,8 +504,9 @@ class BehaviorTask(BaseTask):
                 low_dim_obs[f"{obj.bddl_inst}_pos"] = th.zeros(3)
                 low_dim_obs[f"{obj.bddl_inst}_ori_cos"] = th.zeros(3)
                 low_dim_obs[f"{obj.bddl_inst}_ori_sin"] = th.zeros(3)
-                for arm in agent.arm_names:
-                    low_dim_obs[f"{obj.bddl_inst}_in_gripper_{arm}"] = th.zeros(1)
+                if has_arms:
+                    for arm in agent.arm_names:
+                        low_dim_obs[f"{obj.bddl_inst}_in_gripper_{arm}"] = th.zeros(1)
 
         return low_dim_obs, dict()
 
