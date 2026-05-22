@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-05-14T19:53:28.396437+00:00",
+  "repo": "/home/anuriha/BEHAVIOR-1K",
+  "bddl_roots": [
+    "/home/anuriha/BEHAVIOR-1K/bddl3/bddl/activity_definitions"
+  ],
+  "eval_files_found": [
+    "/home/anuriha/BEHAVIOR-1K/OmniGibson/omnigibson/learning/eval.py"
+  ],
+  "eval_file_used_for_command_guess": "/home/anuriha/BEHAVIOR-1K/OmniGibson/omnigibson/learning/eval.py",
+  "robot_type": "R1Pro",
+  "robot_type_source": "--robot-type",
+  "count": 1019
+}

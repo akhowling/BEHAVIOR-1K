@@ -1,0 +1,5 @@
+[t=19.398s step=0] NEARBY lawn_aztwla_0(0.00m), paver_sekqqq_0(0.00m), roof_pgwmer_0(0.00m), robot_r1(0.00m), stairs_tikozn_0(0.64m)
+
+=== SUMMARY ===
+total collision events: 0
+unique collided objects: []

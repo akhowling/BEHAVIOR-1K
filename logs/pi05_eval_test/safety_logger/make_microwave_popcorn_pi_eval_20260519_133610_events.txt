@@ -1,0 +1,17 @@
+[t=18.849s step=0] NEARBY_RELEVANT stairs_tikozn_0(0.64m), straight_chair_uofiqj_1(0.96m), breakfast_table_xftrki_0(1.20m), straight_chair_uofiqj_0(1.39m)
+
+=== SUMMARY ===
+total_collision_events: 0
+unique_collided_objects: []
+unique_collisions_count: 0
+total_safety_interventions: 0
+total_action_modifications: 0
+total_task_successes: 0
+total_task_failures: 0
+near_miss_warning_steps: 20
+near_miss_danger_steps: 0
+near_miss_warning_time: 16.237714290618896
+near_miss_danger_time: 0.0
+min_relevant_distance_seen: 0.6368978023529053
+min_all_distance_seen: 0.0
+max_object_displacements_top20: [{'name': 'robot_r1', 'category': 'agent', 'max_displacement': 0.00011552364299568821}, {'name': 'garden_chair_cottya_1', 'category': 'garden_chair', 'max_displacement': 2.5959191412162643e-05}, {'name': 'popcorn_bag_73', 'category': 'popcorn_bag', 'max_displacement': 6.977563203173588e-06}, {'name': 'coffee_table_koagbh_0', 'category': 'coffee_table', 'max_displacement': 1.6691961246657903e-06}, {'name': 'standing_mirror_wwkuuf_0', 'category': 'standing_mirror', 'max_displacement': 1.430511474609375e-06}, {'name': 'garden_chair_cottya_0', 'category': 'garden_chair', 'max_displacement': 2.384185791015625e-07}, {'name': 'garden_chair_cottya_2', 'category': 'garden_chair', 'max_displacement': 2.086162567138672e-07}, {'name': 'garden_chair_lraplz_0', 'category': 'garden_chair', 'max_displacement': 1.1920928955078125e-07}, {'name': 'washer_ziomqg_0', 'category': 'washer', 'max_displacement': 2.9802322387695312e-08}, {'name': 'bottom_cabinet_qacthv_0', 'category': 'bottom_cabinet', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_0', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_1', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_10', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_2', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_3', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_4', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_5', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_6', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_7', 'category': 'bush', 'max_displacement': 0.0}, {'name': 'bush_cwsigt_8', 'category': 'bush', 'max_displacement': 0.0}]
