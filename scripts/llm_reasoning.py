@@ -58,9 +58,133 @@ def ollama_chat_json(
     temperature: float = 0.0,
 ) -> Dict[str, Any]:
     """
-    Calls Ollama using settings from .env.
+    Calls PARCC/LiteLLM when LLM_PROVIDER=parcc or PARCC_URL is set.
+    Otherwise falls back to Ollama.
     """
 
+    provider = os.getenv("LLM_PROVIDER", "").lower().strip()
+
+    parcc_url = os.getenv("PARCC_URL")
+    parcc_key = os.getenv("PARCC_API_KEY")
+    parcc_model = (
+        os.getenv("PARCC_MODEL")
+        or os.getenv("OPENAI_MODEL")
+        or os.getenv("OLLAMA_MODEL")
+        or "openai/gpt-oss-20b"
+    )
+
+    if provider == "parcc" or parcc_url:
+        if not parcc_url:
+            return {"ok": False, "error": "PARCC_URL is not set."}
+
+        if not parcc_key:
+            return {"ok": False, "error": "PARCC_API_KEY is not set."}
+
+        base_url = parcc_url.rstrip("/")
+        if base_url.endswith("/v1"):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
+
+        payload = {
+            "model": parcc_model,
+            "temperature": temperature,
+            "max_tokens": 512,
+            "reasoning_effort": "low",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": system_prompt + "\nReturn only valid JSON. Do not include markdown.",
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {parcc_key}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                body = ""
+            return {
+                "ok": False,
+                "error": f"PARCC HTTP error: {e}",
+                "body": body,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": f"Could not reach PARCC: {repr(e)}",
+            }
+
+        try:
+            outer = json.loads(raw)
+        except json.JSONDecodeError:
+            return {
+                "ok": False,
+                "error": "PARCC returned non JSON response.",
+                "raw": raw,
+            }
+
+        try:
+            content = outer["choices"][0]["message"]["content"]
+        except Exception:
+            return {
+                "ok": False,
+                "error": "PARCC response did not contain choices[0].message.content.",
+                "raw_response": outer,
+            }
+
+        if isinstance(content, dict):
+            parsed = content
+        else:
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                left = content.find("{")
+                right = content.rfind("}")
+                if left >= 0 and right > left:
+                    try:
+                        parsed = json.loads(content[left:right + 1])
+                    except json.JSONDecodeError:
+                        return {
+                            "ok": False,
+                            "error": "PARCC model did not return valid JSON content.",
+                            "raw_content": content,
+                            "raw_response": outer,
+                        }
+                else:
+                    return {
+                        "ok": False,
+                        "error": "PARCC model did not return valid JSON content.",
+                        "raw_content": content,
+                        "raw_response": outer,
+                    }
+
+        return {
+            "ok": True,
+            "json": parsed,
+            "raw_response": outer,
+        }
+
+    # Default fallback: Ollama.
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
 
@@ -89,7 +213,6 @@ def ollama_chat_json(
         ],
     }
 
-    
     if user and password:
         payload["user"] = user
         payload["password"] = password
@@ -104,7 +227,7 @@ def ollama_chat_json(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=45) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.URLError as e:
         return {
@@ -139,9 +262,6 @@ def ollama_chat_json(
         "raw_response": outer,
     }
 
-# ============================================================
-# JSON helpers
-# ============================================================
 
 def json_dumps(obj: Any) -> str:
     return json.dumps(obj, indent=2, sort_keys=True, default=str)
@@ -261,8 +381,9 @@ You must follow these rules:
 3. You must not invent object positions, collisions, task success, safety violations, or available actions.
 4. You must choose only from the provided action_catalog.
 5. You must choose only an action with allowed=true.
-6. If all actions are unsafe or the evidence is unclear, choose the safest stop or hold action if it exists.
-7. Do not provide hidden chain of thought.
+6. If the current state is safe and a raw policy/progress action is allowed, choose the progress action instead of stop.
+7. If the current state is unsafe, contact is present, clearance is too small, or evidence is unclear, choose the safest stop or hold action if it exists.
+8. Do not provide hidden chain of thought.
 8. Give a short evidence based rationale only.
 9. Your output must be valid JSON.
 
@@ -383,7 +504,9 @@ def run_commander_once(
         "raw_window": raw_window.get("result") if raw_window else None,
         "decision_instruction": (
             "Choose exactly one chosen_action_id from allowed_action_ids. "
-            "If allowed_action_ids is empty, choose a stop or hold action from action_catalog if present."
+            "If the state is safe and an allowed policy/progress action exists, choose that action to continue task progress. "
+            "Choose stop only when the state is unsafe, contact is present, clearance is too small, evidence is unclear, "
+            "or no progress action is allowed."
         ),
     }
 
@@ -406,7 +529,7 @@ Return only valid JSON in the required schema.
 
     final = {
         "log_path": log_path,
-        "model": os.getenv("OLLAMA_MODEL", "gpt-oss:20b"),
+        "model": os.getenv("PARCC_MODEL") or os.getenv("OLLAMA_MODEL", "gpt-oss:20b"),
         "mission": mission,
         "candidate_actions": candidate_actions,
         "action_catalog": action_catalog,
@@ -422,7 +545,7 @@ Return only valid JSON in the required schema.
 
     if not model_result.get("ok"):
         final["used_fallback"] = True
-        final["final_reason"] = "Ollama failed or returned invalid JSON. Used deterministic tool fallback."
+        final["final_reason"] = "LLM failed or returned invalid JSON. Used deterministic tool fallback."
 
         if fallback:
             final["chosen_action"] = fallback.get("action")

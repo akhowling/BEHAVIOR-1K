@@ -175,6 +175,16 @@ def _classify_action(action: Any) -> Dict[str, Any]:
     """
 
     text = _normalize_action_text(action)
+    if isinstance(action, dict):
+        name = str(action.get("name", "")).lower()
+        kind = str(action.get("kind", "")).lower()
+
+        if name == "execute_policy_action" or kind == "raw_policy_action":
+            return {
+                "action_text": text,
+                "category": "policy",
+                "numeric_hint": None,
+            }
 
     stop_words = [
         "stop",
@@ -351,9 +361,30 @@ def _risk_from_state_and_action(
     reasons = []
     allowed = True
 
+    # A safe state should prefer task progress over stopping.
+    # Stop is still allowed, but it should not dominate merely because its risk is zero.
+    clearance_known_and_safe = (
+        min_dist is not None and min_dist > safety_radius_m
+    )
+    speed_known_or_ok = (
+        latest_speed_mps is None or latest_speed_mps <= speed_limit_mps
+    )
+    state_safe_for_progress = (
+        clearance_known_and_safe
+        and not had_contact
+        and not safety_violation
+        and speed_known_or_ok
+    )
+
     if category == "stop":
-        risk_score += 0
-        reasons.append("Stop or hold action is the safest fallback.")
+        if state_safe_for_progress:
+            risk_score += 30
+            reasons.append(
+                "Stop is safe but unnecessarily halts task progress because the current state is outside the safety radius."
+            )
+        else:
+            risk_score += 0
+            reasons.append("Stop or hold action is the safest fallback.")
     elif category == "back":
         risk_score += 15
         reasons.append("Backing away may increase clearance, but rear space is not verified by this log.")
@@ -366,6 +397,15 @@ def _risk_from_state_and_action(
     elif category == "manipulation":
         risk_score += 35
         reasons.append("Manipulation can disturb nearby objects, so it needs object and contact checks.")
+    elif category == "policy":
+        if state_safe_for_progress:
+            risk_score += 5
+            reasons.append(
+                "Raw policy action is preferred because the current state is outside the safety radius with no active contact or violation."
+            )
+        else:
+            risk_score += 25
+            reasons.append("Raw policy action is allowed only when the current state is not already unsafe.")
     else:
         risk_score += 45
         reasons.append("Action type is unknown, so it is treated conservatively.")
@@ -374,7 +414,7 @@ def _risk_from_state_and_action(
         risk_score += 40
         reasons.append("Current or recent step shows contact with object bodies.")
 
-        if category in ("forward", "manipulation", "unknown"):
+        if category in ("forward", "manipulation", "unknown", "policy"):
             allowed = False
             reasons.append("Action is blocked because contact is already present.")
 
@@ -395,7 +435,7 @@ def _risk_from_state_and_action(
                 f"Closest distance {min_dist:.3f} m is inside safety radius {safety_radius_m:.3f} m."
             )
 
-            if category in ("forward", "manipulation", "unknown"):
+            if category in ("forward", "manipulation", "unknown", "policy"):
                 allowed = False
                 reasons.append("Action is blocked because it may worsen a safety radius violation.")
 
@@ -407,7 +447,7 @@ def _risk_from_state_and_action(
         risk_score += 20
         reasons.append("No closest distance was logged, so clearance is unknown.")
 
-        if category in ("forward", "manipulation", "unknown"):
+        if category in ("forward", "manipulation", "unknown", "policy"):
             allowed = False
             reasons.append("Action is blocked because clearance is unknown.")
 
@@ -415,7 +455,7 @@ def _risk_from_state_and_action(
         risk_score += 30
         reasons.append("Latest step is marked as a safety violation.")
 
-        if category in ("forward", "manipulation", "unknown"):
+        if category in ("forward", "manipulation", "unknown", "policy"):
             allowed = False
             reasons.append("Action is blocked because latest state is already unsafe.")
 
@@ -1135,8 +1175,9 @@ def evaluate_candidate_actions(
         "allowed_actions": allowed,
         "blocked_actions": blocked,
         "decision_rule": (
-            "Choose the lowest risk allowed action. "
-            "If no action is allowed, choose stop or emergency_stop."
+            "If the current state is safe and the raw policy action is allowed, prefer task progress. "
+            "Choose stop or recovery actions when the state is unsafe, clearance is too small, contact is present, "
+            "or no progress action is allowed."
         ),
     }
 

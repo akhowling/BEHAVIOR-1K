@@ -11,3 +11,18 @@ assets/
 .DS_Store
 *_old.py
 *_backup.py
+
+# TRACE-Safe generated outputs
+logs/
+paper_outputs/
+
+# Runtime artifacts
+*.jsonl
+*_events.txt
+*.mp4
+*.avi
+*.mov
+
+# Backup scratch files
+*.bak
+*.bak_*
