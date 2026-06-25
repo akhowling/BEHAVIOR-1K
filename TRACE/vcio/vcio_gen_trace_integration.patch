@@ -1,0 +1,292 @@
+diff --git a/agent.py b/agent.py
+index c08b1ff..11bcabd 100644
+--- a/agent.py
++++ b/agent.py
+@@ -1,57 +1,107 @@
+ import json
+ import os
+-from openai import OpenAI
+-import google.genai as genai
++import urllib.request
++import urllib.error
+ 
+-LLM_PROVIDER = "openai"
++
++OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
++OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:32b")
++
++
++def _ollama_chat_json(system_prompt, user_prompt, temperature=0.0):
++    url = OLLAMA_BASE_URL.rstrip("/") + "/api/chat"
++
++    payload = {
++        "model": OLLAMA_MODEL,
++        "messages": [
++            {
++                "role": "system",
++                "content": system_prompt + "\n\nReturn only valid JSON. Do not use markdown.",
++            },
++            {
++                "role": "user",
++                "content": user_prompt,
++            },
++        ],
++        "stream": False,
++        "format": "json",
++        "options": {
++            "temperature": temperature,
++        },
++    }
++
++    data = json.dumps(payload).encode("utf-8")
++
++    req = urllib.request.Request(
++        url,
++        data=data,
++        headers={"Content-Type": "application/json"},
++        method="POST",
++    )
++
++    with urllib.request.urlopen(req, timeout=300) as resp:
++        raw = resp.read().decode("utf-8")
++
++    outer = json.loads(raw)
++    content = outer.get("message", {}).get("content", "")
++
++    return json.loads(content)
+ 
+ 
+ class Agent:
+-	def __init__(self, systemInstruction):
+-		self.m_systemInstruction = systemInstruction
+-		self.m_history = []
+-
+-	def chatCall(self, userMessage):
+-		responseText = None
+-		try:
+-			if LLM_PROVIDER == "openai":
+-				openAiClient = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+-				messagesPayload = [{"role": "system", "content": self.m_systemInstruction}]
+-				for msg in self.m_history:
+-					messagesPayload.append(msg)
+-				messagesPayload.append({"role": "user", "content": userMessage})
+-
+-				# print(f"\n\nMessage sent to GPT:{messagesPayload}\n\n")
+-				
+-				apiResponse = openAiClient.chat.completions.create(
+-					model="gpt-4o",
+-					messages=messagesPayload,
+-					response_format={"type": "json_object"}
+-				)
+-				responseText = apiResponse.choices[0].message.content
+-				
+-			elif LLM_PROVIDER == "gemini":
+-				genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+-				geminiModel = genai.GenerativeModel('gemini-1.5-pro')
+-				
+-				conversationHistory = ""
+-				for msg in self.m_history:
+-					roleName = "User" if msg["role"] == "user" else "Model"
+-					conversationHistory += f"{roleName}: {msg['content']}\n\n"
+-				
+-				fullPrompt = f"{self.m_systemInstruction}\n\n{conversationHistory}User: {userMessage}"
+-				
+-				apiResponse = geminiModel.generate_content(
+-					fullPrompt,
+-					generation_config={"response_mime_type": "application/json"}
+-				)
+-				responseText = apiResponse.text
+-				
+-			if responseText is not None:
+-				self.m_history.append({"role": "user", "content": userMessage})
+-				self.m_history.append({"role": "assistant" if LLM_PROVIDER == "openai" else "model", "content": responseText})
+-				
+-		except Exception as errorInstance:
+-			print(f"Error during stateful chat call: {errorInstance}")
+-			
+-		return responseText
++    """
++    Stateful VCIO LLM agent.
++
++    Keeps the same interface expected by vcio_gen/framework.py:
++        responseText = agent.chatCall(userMessage)
++
++    Backend:
++        local Ollama JSON mode
++    """
++
++    def __init__(self, systemInstruction):
++        self.m_systemInstruction = systemInstruction
++        self.m_history = []
++
++    def chatCall(self, userMessage):
++        try:
++            history_text = ""
++
++            for msg in self.m_history:
++                role = msg.get("role", "unknown")
++                content = msg.get("content", "")
++                history_text += f"{role}: {content}\n\n"
++
++            if history_text:
++                full_user_prompt = (
++                    "Conversation history:\n"
++                    f"{history_text}\n"
++                    "New user message:\n"
++                    f"{userMessage}"
++                )
++            else:
++                full_user_prompt = userMessage
++
++            response_json = _ollama_chat_json(
++                system_prompt=self.m_systemInstruction,
++                user_prompt=full_user_prompt,
++                temperature=0.0,
++            )
++
++            response_text = json.dumps(response_json)
++
++            self.m_history.append({
++                "role": "user",
++                "content": userMessage,
++            })
++
++            self.m_history.append({
++                "role": "assistant",
++                "content": response_text,
++            })
++
++            return response_text
++
++        except Exception as errorInstance:
++            print(f"Error during stateful chat call: {errorInstance}")
++            return None
+diff --git a/framework.py b/framework.py
+index 51a4caf..09cf380 100644
+--- a/framework.py
++++ b/framework.py
+@@ -2,6 +2,11 @@ import json
+ import agent
+ import time
+ 
++try:
++	from TRACE.vcio.coding_agent import run_vcio_coding_agent
++except Exception:
++	run_vcio_coding_agent = None
++
+ ## Some configuration stuff
+ API_TIMEOUTS = 3
+ API_COOLOFF = 2
+@@ -44,18 +49,29 @@ class Framework:
+ 		return responseJSON
+ 
+ 
++
+ 	def runCodingAgent(self, observable, metaData, availableStates):
+-		systemInstruction = "You are an expert robotics software engineer. You must write a python script to parse a BEHAVIOR-1k log file and output a score using the user provided metrics."
++		"""
++		Closed-loop VCIO coding step.
+ 
+-		# TODO: Run API call...
++		Observable Agent proposes score bins.
++		Coding Agent tries to turn bins into executable Python.
++		If code generation or validation fails, return feedback.
++		If code works, return None.
++		"""
++		if run_vcio_coding_agent is None:
++			return "TRACE VCIO coding agent could not be imported. Check PYTHONPATH."
+ 
+-		# Manually decide if things worked...
+-		good_to_code = input(f"Here is the produced observable:\n{observable}\nAccept response? [y/N] ")
+-		if good_to_code == "N":
+-			feedback = input("Please give feedback: ")
+-			return feedback
+-		else:
+-			return None
++		log_path = getattr(self, "log_path", None)
++		output_dir = getattr(self, "generated_code_dir", "TRACE/generated_vcio")
++
++		return run_vcio_coding_agent(
++			observable=observable,
++			metaData=metaData,
++			availableStates=availableStates,
++			log_path=log_path,
++			output_dir=output_dir,
++		)
+ 
+ 
+ 	def runObservablesAgent(self, indicator, metaData, availableStates):
+@@ -81,7 +97,7 @@ class Framework:
+ 			if responseJSON is not None:
+ 				# Parse what was sent to us...
+ 				if "invalid" in responseJSON:
+-					print(f"--> Bad Indicator {json.dumps(indicator)}: {responseJSON["invalid"]}")
++					print(f"--> Bad Indicator {json.dumps(indicator)}: {responseJSON['invalid']}")
+ 					response = responseJSON["invalid"]
+ 					break
+ 				elif "observables" in responseJSON:
+@@ -133,7 +149,7 @@ class Framework:
+ 			if indicatorsJSON is not None:
+ 				# Parse what was sent to us...
+ 				if "invalid" in indicatorsJSON:
+-					print(f"-> Bad Criteria {criteria['criterion_name']}: {indicatorsJSON["invalid"]}")
++					print(f"-> Bad Criteria {criteria['criterion_name']}: {indicatorsJSON['invalid']}")
+ 					return_val = indicatorsJSON["invalid"]
+ 					break
+ 				elif "indicators" in indicatorsJSON:
+@@ -167,12 +183,12 @@ class Framework:
+ 						updatedIndicator = self.callJSONAgent(self.indicatorAgent, prompt)
+ 						# If flagged as invalid: throw out indicator, break inner loop
+ 						if "invalid" in updatedIndicator:
+-							print(f"-> Agent has abandoned Indicator '{indicator['indicator_name']}': {updatedIndicator["invalid"]}")
++							print(f"-> Agent has abandoned Indicator '{indicator['indicator_name']}': {updatedIndicator['invalid']}")
+ 							generating_observables = False
+ 							break
+ 						# Else-If given update: continue
+-						elif "indicators" in updatedIndicator and "metric" in updatedIndicator:
+-							print(f"-> Agent updated Indicator '{updatedIndicator['indicator_name']}': {updatedIndicator["metric"]}")
++						elif "indicator_name" in updatedIndicator and "metric" in updatedIndicator:
++							print(f"-> Agent updated Indicator '{updatedIndicator['indicator_name']}': {updatedIndicator['metric']}")
+ 							indicator = updatedIndicator
+ 							break
+ 						# Else: complain...
+@@ -234,7 +250,7 @@ class Framework:
+ 			if criteriaJSON is not None:
+ 				# Parse what was sent to us...
+ 				if "invalid" in criteriaJSON:
+-					print(f"-> Bad Value '{valueName}': {criteriaJSON["invalid"]}")
++					print(f"-> Bad Value '{valueName}': {criteriaJSON['invalid']}")
+ 					return_val = criteriaJSON["invalid"]
+ 					break
+ 				elif "criteria" in criteriaJSON:
+@@ -268,12 +284,12 @@ class Framework:
+ 						updatedCriteria = self.callJSONAgent(self.criteriaAgent, prompt)
+ 						# If flagged as invalid: throw out criteria, break inner loop
+ 						if "invalid" in updatedCriteria:
+-							print(f"> Agent has abandoned Indicator '{criteria['criterion_name']}': {updatedCriteria["invalid"]}")
++							print(f"> Agent has abandoned Indicator '{criteria['criterion_name']}': {updatedCriteria['invalid']}")
+ 							generating_criteria = False
+ 							break
+ 						# Else-If given update: continue
+ 						elif "criterion_name" in updatedCriteria and "description" in updatedCriteria:
+-							print(f"> Agent updated Criteria '{updatedCriteria['criterion_name']}': {updatedCriteria["description"]}")
++							print(f"> Agent updated Criteria '{updatedCriteria['criterion_name']}': {updatedCriteria['description']}")
+ 							criteria = updatedCriteria
+ 							break
+ 						# Else: complain...
+@@ -339,6 +355,8 @@ if __name__ == '__main__':
+ 
+ 	# Initiate the depth-first traversal
+ 	vcio_framework = Framework()
++	vcio_framework.log_path = jsonlFileName
++	vcio_framework.generated_code_dir = "TRACE/generated_vcio"
+ 	success, finalOutput = vcio_framework.runCriteriaPipeline(valueName, valueDescription, metaData, availableStates)
+ 
+ 	if success:
+@@ -347,4 +365,4 @@ if __name__ == '__main__':
+ 		with open(outputFileName, 'w') as outFile:
+ 			json.dump(finalOutput, outFile, indent=4)
+ 
+-	print(f"Success! Final VCIO framework structure saved to {outputFileName}")	
+\ No newline at end of file
++	print(f"Success! Final VCIO framework structure saved to {outputFileName}")	

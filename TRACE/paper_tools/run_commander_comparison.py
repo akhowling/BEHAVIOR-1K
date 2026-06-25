@@ -6,8 +6,8 @@ from collections import Counter
 
 sys.path.insert(0, "scripts")
 
-from llm_reasoning import run_commander_once
-from safety_log_tools import choose_safe_action
+from TRACE.commander.llm_reasoning import run_commander_once
+from TRACE.logging.safety_log_tools import choose_safe_action
 
 INPUT = Path("paper_outputs/replay_inputs.csv")
 OUT = Path("paper_outputs/commander_comparison.csv")

@@ -8,6 +8,7 @@ python -c "import hydra; print('hydra ok')"
 set -u
 
 REPO_ROOT="$HOME/behavior-1k-solution"
+export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/scripts:${PYTHONPATH:-}"
 # TASK_JSONL="$REPO_ROOT/logs/behavior_tasks.jsonl"
 SUPPORTED_TASKS_FILE="$REPO_ROOT/logs/pi05_supported_tasks.txt"
 

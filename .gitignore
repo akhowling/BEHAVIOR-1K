@@ -26,3 +26,18 @@ paper_outputs/
 # Backup scratch files
 *.bak
 *.bak_*
+
+# TRACE local logs and generated outputs
+logs/
+pi_eval.jsonl
+value_breakdown.json
+TRACE/generated_vcio/
+__pycache__/
+*.pyc
+
+# Local models / checkpoints
+models/
+*.ckpt
+*.pt
+*.pth
+/vcio_gen/
